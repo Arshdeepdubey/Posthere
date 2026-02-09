@@ -2,7 +2,7 @@ name: Java CD with Maven
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "rest-microservice" ]
 
 jobs:
   deploy:

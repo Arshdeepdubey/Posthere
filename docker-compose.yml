@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  posthere-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: posthere-microservice
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - JAVA_OPTS=-Xmx512m -Xms256m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - posthere-network
+    restart: unless-stopped
+
+  argocd:
+    image: quay.io/argoproj/argocd:latest
+    container_name: argocd-server
+    ports:
+      - "8443:8443"
+      - "8080:80"
+    environment:
+      - ARGOCD_SERVER_INSECURE=true
+    volumes:
+      - argocd-data:/var/lib/argocd
+    networks:
+      - posthere-network
+    restart: unless-stopped
+
+volumes:
+  argocd-data:
+
+networks:
+  posthere-network:
+    driver: bridge

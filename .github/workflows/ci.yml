@@ -1,24 +1,131 @@
-name: Java CI with Maven
+name: Continuous Integration (Build & Test)
 
 on:
   push:
-    branches: [ "rest-microservice" ]
+    branches: [ main, develop, rest-microservice ]
   pull_request:
-    branches: [ "rest-microservice" ]
+    branches: [ main, develop, rest-microservice ]
 
 jobs:
-  build:
-
+  build-and-test:
     runs-on: ubuntu-latest
+    name: Build & Test Microservice
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: maven
+      # Step 1: Checkout the code
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Build with Maven
-      run: mvn -B package --file pom.xml
+      # Step 2: Set up Java 17
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      # Step 3: Initialize Git (for versioning if needed)
+      - name: Initialize Git
+        run: |
+          git config --global user.email "ci@posthere.dev"
+          git config --global user.name "PostHere CI"
+          git status
+          echo "Git initialized"
+
+      # Step 4: Validate Maven POM
+      - name: Validate Maven POM
+        run: mvn validate -B
+
+      # Step 5: Run Maven clean install (compile + unit tests)
+      - name: Build and Run Tests
+        run: mvn clean install -B -V
+        timeout-minutes: 15
+
+      # Step 6: Generate test reports
+      - name: Generate Test Reports
+        if: always()
+        run: |
+          echo "Test execution completed"
+          if [ -d target/surefire-reports ]; then
+            echo "Test Reports Available:"
+            ls -la target/surefire-reports/
+          fi
+
+      # Step 7: Upload test results
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: target/surefire-reports/
+          retention-days: 30
+
+      # Step 8: Upload build artifacts
+      - name: Upload Build Artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jar-artifact
+          path: target/gemini-hello-*.jar
+          retention-days: 30
+
+      # Step 9: Check JAR file size
+      - name: Verify JAR Creation
+        if: success()
+        run: |
+          JAR_FILE=$(ls target/gemini-hello-*.jar | head -1)
+          if [ -f "$JAR_FILE" ]; then
+            JAR_SIZE=$(du -h "$JAR_FILE" | cut -f1)
+            echo "✓ JAR created successfully: $JAR_FILE ($JAR_SIZE)"
+          else
+            echo "✗ JAR file not found!"
+            exit 1
+          fi
+
+  security-scan:
+    runs-on: ubuntu-latest
+    name: Security Scanning
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Trivy Container Image Scanning
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+        continue-on-error: true
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+        continue-on-error: true
+
+  code-quality:
+    runs-on: ubuntu-latest
+    name: Code Quality Checks
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      # Run SpotBugs Static Analysis
+      - name: Run SpotBugs Analysis
+        run: |
+          mvn spotbugs:check -DfailOnError=false || true
+        continue-on-error: true

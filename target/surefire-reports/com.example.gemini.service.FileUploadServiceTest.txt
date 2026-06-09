@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: com.example.gemini.service.FileUploadServiceTest
+-------------------------------------------------------------------------------
+Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.414 s -- in com.example.gemini.service.FileUploadServiceTest

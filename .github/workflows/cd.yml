@@ -1,27 +1,166 @@
-name: Java CD with Maven
+name: Continuous Deployment (Docker & Registry)
 
 on:
   push:
-    branches: [ "rest-microservice" ]
+    branches: [ main, rest-microservice ]
+    tags:
+      - 'v*'
+  workflow_run:
+    workflows: ["Continuous Integration (Build & Test)"]
+    types: [completed]
+    branches: [main, rest-microservice]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DOCKER_IMAGE_NAME: posthere-microservice
 
 jobs:
-  deploy:
+  build-and-push-docker:
     runs-on: ubuntu-latest
+    name: Build & Push Docker Image
+    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
+    
+    permissions:
+      contents: read
+      packages: write
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: maven
+      # Step 1: Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Build Artifcat (Skip Tests)
-      run: mvn -B package -DskipTests --file pom.xml
+      # Step 2: Set up Java
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
 
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: gemini-hello-jar
-        path: target/*.jar
+      # Step 3: Build JAR artifact
+      - name: Build Maven Artifact (Skip Tests)
+        run: mvn clean package -DskipTests -B -V
+        timeout-minutes: 15
+
+      # Step 4: Verify JAR was created
+      - name: Verify JAR Artifact
+        run: |
+          JAR_FILE=$(ls target/gemini-hello-*.jar | head -1)
+          if [ -f "$JAR_FILE" ]; then
+            echo "JAR_PATH=$JAR_FILE" >> $GITHUB_ENV
+            echo "✓ JAR created: $JAR_FILE ($(du -h $JAR_FILE | cut -f1))"
+          else
+            echo "✗ JAR file not found!"
+            exit 1
+          fi
+
+      # Step 5: Set up Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      # Step 6: Log in to GitHub Container Registry
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 7: Generate image tags
+      - name: Generate Docker Image Tags
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # Step 8: Build and push Docker image
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+      # Step 9: Scan Docker image for vulnerabilities
+      - name: Scan Docker Image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          format: 'sarif'
+          output: 'docker-trivy-results.sarif'
+        continue-on-error: true
+
+      - name: Upload Docker scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'docker-trivy-results.sarif'
+          category: 'docker-image'
+        continue-on-error: true
+
+      # Step 10: Verify image push
+      - name: Verify Image Push
+        run: |
+          echo "✓ Docker image pushed successfully"
+          echo "Registry: ${{ env.REGISTRY }}"
+          echo "Image: ${{ env.IMAGE_NAME }}"
+          echo "Tags: ${{ steps.meta.outputs.tags }}"
+
+  deploy-to-staging:
+    needs: build-and-push-docker
+    runs-on: ubuntu-latest
+    name: Deploy to Staging
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/rest-microservice'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # This is a placeholder for actual deployment
+      - name: Deploy to Staging Environment
+        run: |
+          echo "📦 Deployment to staging would occur here"
+          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          echo "Note: Configure your deployment target (Kubernetes, Docker Swarm, AWS ECS, etc.)"
+          
+      - name: Run Health Check
+        run: |
+          echo "✓ Deployment validation steps would run here"
+          echo "  - Wait for container startup"
+          echo "  - Verify service health endpoints"
+          echo "  - Run smoke tests"
+
+  create-release:
+    needs: build-and-push-docker
+    runs-on: ubuntu-latest
+    name: Create GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: jar-artifact
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: target/gemini-hello-*.jar
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

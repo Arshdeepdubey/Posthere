@@ -1,0 +1,4 @@
+com/example/gemini/service/FileUploadServiceTest.class
+com/example/gemini/service/FileExtractionServiceTest.class
+com/example/gemini/service/EmailServiceTest.class
+com/example/gemini/service/DetailsServiceTest.class

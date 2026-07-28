@@ -13,7 +13,7 @@ A Spring Boot microservice application demonstrating loose coupling, database se
 
 ### Prerequisites
 
-- Java 17
+- Java 25
 - Maven
 
 ### Installation
